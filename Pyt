@@ -1,0 +1,153 @@
+# 1. Setup
+pkg install python -y
+mkdir -p ~/pyt-tool && cd ~/pyt-tool
+
+# 2. Write the pyt file
+cat > pyt << 'PYT_EOF'
+#!/data/data/com.termux/files/usr/bin/env python3
+"""PYT — Python Tool for Termux"""
+from __future__ import annotations
+import argparse, os, platform, shutil, sys, textwrap, time
+from pathlib import Path
+
+class C:
+    RESET="\033[0m"; BOLD="\033[1m"; DIM="\033[2m"
+    RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"
+    BLUE="\033[34m"; MAGENTA="\033[35m"; CYAN="\033[36m"; WHITE="\033[37m"
+    @classmethod
+    def init(cls):
+        if not sys.stdout.isatty():
+            for a in dir(cls):
+                if a.isupper() and isinstance(getattr(cls,a),str):
+                    setattr(cls,a,"")
+
+def c(t,col,bold=False):
+    return f"{C.BOLD if bold else ''}{col}{t}{C.RESET}"
+
+BANNER = r"""
+██████╗ ██╗   ██╗████████╗
+██╔══██╗╚██╗ ██╔╝╚══██╔══╝
+██████╔╝ ╚████╔╝    ██║
+██╔═══╝   ╚██╔╝     ██║
+██║        ██║      ██║
+╚═╝        ╚═╝      ╚═╝
+"""
+
+def print_banner():
+    print(c(BANNER,C.CYAN,bold=True))
+    print(c("        PYT — Python Tool for Termux",C.MAGENTA,bold=True))
+    print(c("        v1.0.0  •  production build",C.DIM))
+    print(c("─"*42,C.BLUE))
+
+def cmd_hello(a):
+    print(c(f"[+] Hello, {a.name or 'Termux user'}!",C.GREEN,bold=True))
+    print(f"    Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return 0
+
+def cmd_info(a):
+    p=os.environ.get("PREFIX","/data/data/com.termux/files/usr")
+    print(c("[*] Environment Information",C.CYAN,bold=True))
+    print(f"    Python   : {platform.python_version()}")
+    print(f"    Platform : {platform.platform()}")
+    print(f"    Machine  : {platform.machine()}")
+    print(f"    Prefix   : {p}")
+    print(f"    CWD      : {Path.cwd()}")
+    print(f"    User     : {os.environ.get('USER','unknown')}")
+    t="yes" if "com.termux" in p else "no"
+    print(f"    Termux   : {c(t,C.GREEN if t=='yes' else C.YELLOW)}")
+    return 0
+
+def cmd_echo(a):
+    txt=" ".join(a.text)
+    if a.upper: txt=txt.upper()
+    if a.lower: txt=txt.lower()
+    print(c(txt,getattr(C,a.color.upper(),C.WHITE),bold=a.bold))
+    return 0
+
+def cmd_file(a):
+    p=Path(a.path).expanduser()
+    if not p.exists():
+        print(c(f"[x] Not found: {p}",C.RED,bold=True),file=sys.stderr); return 1
+    print(c(f"[*] {p}",C.CYAN,bold=True))
+    if p.is_file():
+        print(f"    Type : file"); print(f"    Size : {p.stat().st_size} bytes")
+    elif p.is_dir():
+        print(f"    Type    : directory")
+        print(f"    Entries : {len(list(p.iterdir()))}")
+    return 0
+
+def cmd_doctor(a):
+    print(c("[*] Running health check...",C.CYAN,bold=True))
+    checks=[("python3",shutil.which("python3")),("bash",shutil.which("bash")),
+            ("pkg",shutil.which("pkg")),("termux-setup-storage",shutil.which("termux-setup-storage"))]
+    ok=True
+    for n,path in checks:
+        if path: print(f"    {c('✓',C.GREEN)} {n:<22} {c(path,C.DIM)}")
+        else: print(f"    {c('✗',C.RED)} {n:<22} {c('missing',C.YELLOW)}"); ok=False
+    print()
+    print(c("[+] All checks passed." if ok else "[!] Missing deps.",C.GREEN if ok else C.YELLOW,bold=True))
+    return 0 if ok else 1
+
+def build_parser():
+    p=argparse.ArgumentParser(prog="pyt",description="PYT — production CLI for Termux.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+        Examples:
+          pyt hello --name Alice
+          pyt info
+          pyt echo "Hello Termux" --upper --color green --bold
+          pyt file ~/storage/downloads
+          pyt doctor
+        """))
+    p.add_argument("-v","--version",action="version",version="pyt 1.0.0")
+    s=p.add_subparsers(dest="command",metavar="<command>")
+    h=s.add_parser("hello",help="Say hello"); h.add_argument("-n","--name"); h.set_defaults(func=cmd_hello)
+    i=s.add_parser("info",help="Show environment info"); i.set_defaults(func=cmd_info)
+    e=s.add_parser("echo",help="Echo text with styling")
+    e.add_argument("text",nargs="+"); e.add_argument("--upper",action="store_true")
+    e.add_argument("--lower",action="store_true")
+    e.add_argument("--color",default="white",choices=["red","green","yellow","blue","magenta","cyan","white"])
+    e.add_argument("--bold",action="store_true"); e.set_defaults(func=cmd_echo)
+    f=s.add_parser("file",help="Inspect a file/dir"); f.add_argument("path"); f.set_defaults(func=cmd_file)
+    d=s.add_parser("doctor",help="Health check"); d.set_defaults(func=cmd_doctor)
+    return p
+
+def main(argv=None):
+    C.init()
+    parser=build_parser()
+    args=parser.parse_args(argv)
+    if not getattr(args,"command",None):
+        print_banner(); parser.print_help(); return 0
+    print_banner()
+    try: return args.func(args)
+    except KeyboardInterrupt:
+        print(c("\n[!] Interrupted.",C.YELLOW,bold=True),file=sys.stderr); return 130
+    except Exception as e:
+        print(c(f"[x] Error: {e}",C.RED,bold=True),file=sys.stderr); return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
+PYT_EOF
+
+# 3. Write the installer
+cat > install.sh << 'SH_EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+SRC="$(cd "$(dirname "$0")" && pwd)/pyt"
+DEST="${PREFIX:-/data/data/com.termux/files/usr}/bin/pyt"
+[[ ! -f "$SRC" ]] && { echo "[x] Missing: $SRC" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "[!] pkg install python" >&2; exit 1; }
+install -m 755 "$SRC" "$DEST"
+echo "[+] Installed: $DEST"
+echo "[+] Run: pyt --help"
+SH_EOF
+
+# 4. Install it
+chmod +x install.sh pyt
+./install.sh
+
+# 5. Test
+pyt --version
+pyt hello --name Termux
+pyt info
+pyt doctor
